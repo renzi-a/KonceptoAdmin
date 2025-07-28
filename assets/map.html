@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leaflet Map</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoCcT9T3Y09rliK0tC9l+b2V+A3z9R42B3lJ8T8=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-2gGf0M7T3zD12/s+j1g/e6d6rL/aV5g5d5F9+a6xG6g=" crossorigin=""></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; }
+        #map { height: 100vh; width: 100vw; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var map = L.map('map').setView([14.0, 120.9], 13); // Default view, will be updated by RN
+
+        // OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        var driverMarker = null;
+        var destinationMarker = null;
+        var driverCircle = null; // For accuracy circle
+
+        // Custom icon for the driver (optional, can use default marker)
+        var driverIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
+
+        // Custom icon for the destination
+        var destinationIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
+
+        function updateMap(data) {
+            const driverLoc = data.driverLocation;
+            const destLoc = data.destinationLocation;
+            const accuracy = data.accuracy; // New: accuracy of driver location
+
+            if (driverLoc) {
+                var latLng = L.latLng(driverLoc.latitude, driverLoc.longitude);
+                if (driverMarker) {
+                    driverMarker.setLatLng(latLng);
+                } else {
+                    driverMarker = L.marker(latLng, { icon: driverIcon }).addTo(map).bindPopup("Driver Location");
+                }
+                // Update or create accuracy circle
+                if (driverCircle) {
+                    driverCircle.setLatLng(latLng).setRadius(accuracy || 0);
+                } else {
+                    driverCircle = L.circle(latLng, { radius: accuracy || 0, color: 'blue', fillColor: '#3388ff', fillOpacity: 0.2 }).addTo(map);
+                }
+                 map.setView(latLng, map.getZoom()); // Keep map centered on driver
+            }
+
+            if (destLoc) {
+                var destLatLng = L.latLng(destLoc.latitude, destLoc.longitude);
+                if (destinationMarker) {
+                    destinationMarker.setLatLng(destLatLng);
+                } else {
+                    destinationMarker = L.marker(destLatLng, { icon: destinationIcon }).addTo(map).bindPopup(destLoc.address || "Destination");
+                }
+            }
+
+            // Fit bounds to include both markers once both are present
+            if (driverMarker && destinationMarker) {
+                var group = new L.featureGroup([driverMarker, destinationMarker]);
+                map.fitBounds(group.getBounds().pad(0.5)); // pad adds some margin
+            }
+        }
+
+        // Listen for messages from React Native
+        document.addEventListener('message', function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === 'UPDATE_MAP') {
+                updateMap(data.payload);
+            }
+        });
+
+        // Tell React Native that the map is ready
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'MAP_READY' }));
+    </script>
+</body>
+</html>
