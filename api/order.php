@@ -4,7 +4,7 @@ header('Content-Type: application/json');
 
 $dsn = 'mysql:host=localhost;dbname=kocenpto;charset=utf8mb4';
 $db_user = 'root';
-$db_pass = '';
+$db_pass = 'teamvanguard';
 
 try {
     $pdo = new PDO($dsn, $db_user, $db_pass, [

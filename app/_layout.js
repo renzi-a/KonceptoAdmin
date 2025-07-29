@@ -1,9 +1,9 @@
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
 export default function RootLayout() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
@@ -22,7 +22,7 @@ export default function RootLayout() {
     };
 
     checkAuth();
-  }); 
+  }, []); 
 
   if (isLoadingAuth) {
     return (
@@ -38,8 +38,12 @@ export default function RootLayout() {
       {isAuthenticated ? (
         <Stack>
           <Stack.Screen
-            name="(tabs)"
+            name="(tabs)" 
             options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="order/gathering/[orderId]"
+            options={{ headerShown: false }} 
           />
         </Stack>
       ) : (

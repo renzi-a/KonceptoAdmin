@@ -1,11 +1,10 @@
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { apiRequest } from '../../services/api';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { apiRequest } from '../../services/api'; // Ensure this path is correct
 
 const { width } = Dimensions.get('window');
-
 
 export default function GatheringOrderScreen() {
     const navigation = useNavigation();
@@ -21,15 +20,18 @@ export default function GatheringOrderScreen() {
     });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [refreshing, setRefreshing] = useState(false);
 
-    const fetchOrders = async () => {
+    const fetchOrders = useCallback(async () => {
         setLoading(true);
         setError(null);
+        setRefreshing(true); // Start refreshing indicator
+
         try {
-            const endpoint = `/admin/orders?tab=${activeTab}&status=${encodeURIComponent(activeStatus)}`;
+            const endpoint = `/api/admin/orders?tab=${activeTab}&status=${encodeURIComponent(activeStatus)}`;
             console.log('Fetching orders using apiRequest. Endpoint:', endpoint);
 
-            const data = await apiRequest('GET', endpoint); 
+            const data = await apiRequest('GET', endpoint);
 
             console.log('Orders API Response (successful):', data);
 
@@ -37,7 +39,7 @@ export default function GatheringOrderScreen() {
             setCounts({
                 allOrdersCount: data.allOrdersCount,
                 normalOrdersCount: data.normalOrdersCount,
-                customOrdersCount: data.customOrdersCount || data.allOrdersCount,
+                customOrdersCount: data.customOrdersCount, // Use the correct count directly
                 completedOrdersCount: data.completedOrdersCount,
             });
         } catch (err) {
@@ -45,7 +47,6 @@ export default function GatheringOrderScreen() {
             if (err.response) {
                 console.error('Server response for orders error:', err.response.data);
                 console.error('Server status for orders error:', err.response.status);
-                console.error('Server headers for orders error:', err.response.headers);
             } else if (err.message === 'No token found') {
                 setError('Authentication required. Please log in.');
             } else {
@@ -53,18 +54,31 @@ export default function GatheringOrderScreen() {
             }
         } finally {
             setLoading(false);
+            setRefreshing(false); // Stop refreshing indicator
         }
-    };
+    }, [activeTab, activeStatus]); // Dependencies for useCallback
 
+    // Fetch orders on component mount and when activeTab or activeStatus changes
     useEffect(() => {
         fetchOrders();
-    }, [activeTab, activeStatus]);
+    }, [fetchOrders]); // Dependency is the memoized fetchOrders function
+
+    // Use useFocusEffect to refetch data when the screen comes into focus
+    useFocusEffect(
+        useCallback(() => {
+            fetchOrders();
+        }, [fetchOrders])
+    );
 
     const getStatusesForTab = (tab) => {
         if (tab === 'orders') {
             return ['All', 'New', 'To be Delivered', 'Delivered'];
         } else if (tab === 'custom') {
             return ['All', 'To be Quoted', 'Quoted', 'Approved', 'Gathering', 'To be Delivered', 'Delivered'];
+        } else if (tab === 'all') {
+            return ['All', 'New', 'To be Quoted', 'Quoted', 'Approved', 'Gathering', 'To be Delivered', 'Delivered'];
+        } else if (tab === 'completed') {
+            return ['All']; // Or just 'Delivered' if you want to explicitly show only delivered
         }
         return [];
     };
@@ -72,58 +86,68 @@ export default function GatheringOrderScreen() {
     const currentStatuses = getStatusesForTab(activeTab);
 
     const handleViewDetails = (order) => {
-        if (order.status.toLowerCase() === 'to be delivered') {
-            router.push({
-                pathname: `/order/delivery`,
-                params: {
-                    orderId: order.id,
-                    orderType: order.is_custom ? 'custom' : 'normal',
-                },
-            });
-            return;
-        }
-
-        if (order.is_custom && ['approved', 'gathering'].includes(order.status.toLowerCase())) {
-            router.push(`/order/gathering/${order.id}`);
-            return;
-        } else {
-            let detailScreenName = '';
-            if (order.is_custom) {
-                detailScreenName = `CustomOrderDetailsScreen - Order ID: ${order.id}`;
+        if (order.is_custom) {
+            if (['to be quoted', 'quoted'].includes(order.status.toLowerCase())) {
+                router.push({
+                    pathname: `/order/quotation/${order.id}`,
+                    params: { orderId: order.id },
+                });
+            } else if (['approved', 'gathering'].includes(order.status.toLowerCase())) {
+                router.push({
+                    pathname: `/order/gathering/${order.id}`,
+                    params: { orderId: order.id },
+                });
+            } else if (order.status.toLowerCase() === 'to be delivered') {
+                router.push({
+                    pathname: `/order/delivery`,
+                    params: {
+                        orderId: order.id,
+                        orderType: 'custom',
+                    },
+                });
             } else {
-                detailScreenName = `NormalOrderDetailsScreen - Order ID: ${order.id}`;
+                // General custom order details if no specific route matches
+                Alert.alert(
+                    'View Details',
+                    `Navigating to Custom Order Details for ID: ${order.id}\nStatus: ${order.status}`
+                );
             }
-            Alert.alert(
-                'View Details',
-                `Simulating navigation to: ${detailScreenName}\n(This would go to a general order details screen)`,
-                [{ text: 'OK' }]
-            );
+        } else { // Normal orders
+            if (order.status.toLowerCase() === 'to be delivered') {
+                router.push({
+                    pathname: `/order/delivery`,
+                    params: {
+                        orderId: order.id,
+                        orderType: 'normal',
+                    },
+                });
+            } else {
+                // General normal order details
+                router.push({
+                    pathname: `/order/normal-details/${order.id}`, // Example path for normal order details
+                    params: { orderId: order.id },
+                });
+            }
         }
     };
 
     const handleStartQuotation = async (orderId) => {
         console.log(`Starting quotation for Custom Order ID: ${orderId}`);
-        // If you need to make an authenticated API call here, use apiRequest
-        // const apiEndpoint = `/admin/custom-orders/${orderId}/quotation`; // Removed BASE_URL
-        // try {
-        //     const response = await apiRequest('GET', apiEndpoint);
-        //     console.log('Quotation API Response:', response);
-        //     Alert.alert('Start Quotation', 'Quotation data fetched successfully!', [{ text: 'OK' }]);
-        // } catch (error) {
-        //     console.error('Error starting quotation:', error);
-        //     Alert.alert('Error', 'Failed to start quotation.', [{ text: 'OK' }]);
-        // }
-
-        const apiEndpoint = `http://192.168.1.2:8000/api/admin/custom-orders/${orderId}/quotation`; // If you keep this alert, keep the full URL for clarity
-        Alert.alert(
-            'Start Quotation',
-            `Simulating start quotation for Custom Order ID: ${orderId}\nAPI Endpoint: ${apiEndpoint}`,
-            [{ text: 'OK' }]
-        );
+        // Navigate to the quotation screen for the specific order
+        router.push(`/order/quotation/${orderId}`);
     };
 
     return (
-        <ScrollView style={styles.scrollViewContainer}>
+        <ScrollView
+            style={styles.scrollViewContainer}
+            refreshControl={
+                <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={fetchOrders}
+                    colors={['#10B981']} // Customize loading spinner color
+                />
+            }
+        >
             <View style={styles.container}>
                 {/* Header */}
                 <View style={styles.headerContainer}>
@@ -196,7 +220,7 @@ export default function GatheringOrderScreen() {
                 )}
 
                 {/* Loading and Error Indicators */}
-                {loading ? (
+                {loading && !refreshing ? ( // Only show large indicator if not refreshing
                     <ActivityIndicator size="large" color="#10B981" style={styles.loadingIndicator} />
                 ) : error ? (
                     <Text style={styles.errorText}>Error: {error}</Text>
@@ -222,8 +246,8 @@ export default function GatheringOrderScreen() {
                                                 Items: {order.is_custom ? order.items_count : (order.items?.length ?? '-')}
                                             </Text>
                                             <Text style={styles.orderUser}>
-                                                {order.user?.first_name ?? '-'} {order.user?.last_name ?? ''}
-                                                {order.user?.school && ` – ${order.user.school.school_name}`}
+                                                {order.first_name ?? '-'} {order.last_name ?? ''}
+                                                {order.school_name && ` – ${order.school_name}`}
                                             </Text>
                                         </View>
 
@@ -481,58 +505,22 @@ const styles = StyleSheet.create({
         elevation: 3,
     },
     quotationButtonText: {
-        fontSize: 13,
         color: '#FFFFFF',
-        fontWeight: '700',
+        fontWeight: 'bold',
+        fontSize: 14,
     },
     approvedText: {
-        fontSize: 13,
         marginTop: 10,
         color: '#28B463',
-        fontStyle: 'italic',
+        fontSize: 13,
+        fontWeight: '600',
         textAlign: 'right',
     },
-    orderCardFooter: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginTop: 15,
-        borderTopWidth: 1,
-        borderTopColor: '#F0F4F8',
-        paddingTop: 10,
-    },
-    viewDetailsLink: {
-        fontSize: 14,
-        color: '#3B82F6',
-        textDecorationLine: 'underline',
-    },
-    orderDate: {
-        fontSize: 13,
-        color: '#85929E',
-        fontWeight: '500',
-    },
-    noOrdersText: {
-        textAlign: 'center',
-        color: '#85929E',
-        paddingVertical: 50,
-        fontSize: 16,
-    },
-    loadingIndicator: {
-        marginTop: 80,
-    },
-    errorText: {
-        textAlign: 'center',
-        color: '#E74C3C',
-        marginTop: 80,
-        fontSize: 16,
-        fontWeight: 'bold',
-    },
-    // NEW STYLE FOR THE "Start Delivery" button
     startDeliveryButton: {
         marginTop: 10,
         paddingHorizontal: 15,
         paddingVertical: 8,
-        backgroundColor: '#3498DB',
+        backgroundColor: '#3498DB', // A different color for delivery button
         borderRadius: 8,
         shadowColor: '#3498DB',
         shadowOffset: { width: 0, height: 2 },
@@ -541,8 +529,23 @@ const styles = StyleSheet.create({
         elevation: 3,
     },
     startDeliveryButtonText: {
-        fontSize: 13,
         color: '#FFFFFF',
-        fontWeight: '700',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    loadingIndicator: {
+        marginTop: 50,
+    },
+    errorText: {
+        color: 'red',
+        textAlign: 'center',
+        marginTop: 30,
+        fontSize: 16,
+    },
+    noOrdersText: {
+        textAlign: 'center',
+        marginTop: 50,
+        fontSize: 16,
+        color: '#7F8C8D',
     },
 });

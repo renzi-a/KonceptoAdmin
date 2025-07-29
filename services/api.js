@@ -1,9 +1,11 @@
+// services/api.js
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Alert } from 'react-native';
-import { BASE_URL } from '../config'; // Ensure this path is correct
+import { BASE_URL } from '../config'; // Ensure this path is correct relative to services folder
 
-console.log( 'BASE_URL:' , BASE_URL, axios);
+console.log('BASE_URL:', BASE_URL, axios);
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
@@ -15,13 +17,13 @@ const apiClient = axios.create({
 
 export const apiRequest = async (method, endpoint, data = null, headers = {}) => {
   try {
+    // This function remains as you had it for other endpoints that might use '/order.php' proxy
+    const [pathOnly, query] = endpoint.split('?');
+    const url = `/order.php?endpoint=${encodeURIComponent(pathOnly)}${query ? `&${query}` : ''}`;
+
     const config = {
-      method: method,
-      // --- THIS IS THE CRITICAL CHANGE ---
-      // We explicitly tell Axios to target 'order.php' and pass the original 'endpoint'
-      // as a query parameter named 'endpoint'.
-      url: `/order.php?endpoint=${encodeURIComponent(endpoint)}`, 
-      // --- END CRITICAL CHANGE ---
+      method,
+      url,
       headers: { ...apiClient.defaults.headers.common, ...headers },
       data: data,
     };
@@ -30,6 +32,26 @@ export const apiRequest = async (method, endpoint, data = null, headers = {}) =>
     return response.data;
   } catch (error) {
     console.error('API Request Error:', error.response?.data || error.message);
+    Alert.alert('Network Error', error.response?.data?.message || 'Could not connect to the server. Please check your network and try again.');
+    throw error;
+  }
+};
+
+// New function specifically for delivery-related API calls
+export const deliveryApiRequest = async (method, endpoint, data = null, headers = {}) => {
+  try {
+    // This function will hit the endpoint directly, e.g., /delivery.php
+    const config = {
+      method,
+      url: endpoint, // The endpoint will directly be '/delivery.php?...'
+      headers: { ...apiClient.defaults.headers.common, ...headers },
+      data: data,
+    };
+
+    const response = await apiClient(config);
+    return response.data;
+  } catch (error) {
+    console.error('Delivery API Request Error:', error.response?.data || error.message);
     Alert.alert('Network Error', error.response?.data?.message || 'Could not connect to the server. Please check your network and try again.');
     throw error;
   }

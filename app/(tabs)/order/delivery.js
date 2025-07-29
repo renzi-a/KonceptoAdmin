@@ -1,86 +1,92 @@
-import { apiRequest } from '@/services/api';
-import * as Location from 'expo-location'; // Import expo-location
+// app/(tabs)/order/delivery.js
+
+import { deliveryApiRequest } from '@/services/api'; // Correct import for delivery-specific API
+import * as Location from 'expo-location';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import WebView from 'react-native-webview'; // If you're using a local HTML map
- // Adjust path if necessary based on your file structure
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import WebView from 'react-native-webview';
 
 const { width, height } = Dimensions.get('window');
 const ASPECT_RATIO = width / height;
 const LATITUDE_DELTA = 0.0922;
 const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 
-const BASE_URL = 'http://192.168.1.2:8000/api'; // Make sure this is correct
+// --- IMPORTANT: This path is confirmed correct for KonceptoAdmin/assets/map.html ---
+// Assuming your project root is 'KonceptoAdmin'
+// From 'app/(tabs)/order/delivery.js' up three levels to 'KonceptoAdmin/', then into 'assets/'
+const MAP_HTML_SOURCE = require('../../../assets/map.html');
+// --- END IMPORTANT ---
 
 export default function DeliveryScreen() {
     const { orderId, orderType } = useLocalSearchParams();
+
+    // >>> THIS IS THE CONSOLE.LOG YOU SHOULD CHECK <<<
+    console.log('Parameters received in DeliveryScreen:', { orderId, orderType });
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [order, setOrder] = useState(null);
     const [driverLocation, setDriverLocation] = useState(null);
     const [destinationLocation, setDestinationLocation] = useState(null);
     const locationSubscription = useRef(null);
-    const mapRef = useRef(null); // Ref for MapView if you're using it
-
-    // State for WebView (if using HTML map)
     const webViewRef = useRef(null);
-    const [mapHtmlContent, setMapHtmlContent] = useState('');
 
-    useEffect(() => {
-        // Load the map.html content
-        async function loadMapHtml() {
-            try {
-                // Adjust the path to your map.html file
-                const htmlPath = Platform.OS === 'android' ? 'file:///android_asset/map.html' : './assets/map.html';
-                const response = await fetch(htmlPath);
-                const html = await response.text();
-                setMapHtmlContent(html);
-            } catch (e) {
-                console.error('Failed to load map.html:', e);
-                setError('Failed to load map resources.');
-            }
-        }
-        loadMapHtml();
-    }, []);
+    const fetchOrderDetails = useCallback(async () => {
+        try {
+            const response = await deliveryApiRequest('get', `/delivery.php?orderId=${orderId}&orderType=${orderType}`);
+            
+            // Check if response and response.order are valid before setting state
+            if (response && response.order) {
+                setOrder(response.order);
 
-    useEffect(() => {
-        const fetchOrderDetails = async () => {
-            try {
-                const endpoint = orderType === 'custom' ? `/admin/custom-orders/${orderId}` : `/admin/orders/${orderId}`;
-                const response = await apiRequest.get(endpoint); // Assuming apiRequest.get is set up
-                setOrder(response.data.order);
-                if (response.data.order.delivery_location) {
-                    setDestinationLocation({
-                        latitude: parseFloat(response.data.order.delivery_location.latitude),
-                        longitude: parseFloat(response.data.order.delivery_location.longitude),
-                    });
+                // Safely access delivery_location with optional chaining
+                if (response.order.delivery_location) {
+                    const { latitude, longitude } = response.order.delivery_location;
+                    if (latitude && longitude && !isNaN(parseFloat(latitude)) && !isNaN(parseFloat(longitude))) {
+                        setDestinationLocation({
+                            latitude: parseFloat(latitude),
+                            longitude: parseFloat(longitude),
+                        });
+                    } else {
+                        console.warn('Invalid delivery_location data:', response.order.delivery_location);
+                        setError('Invalid delivery location data for this order.');
+                    }
+                } else {
+                    setError('Delivery location not found for this order.');
                 }
-            } catch (err) {
-                console.error('Error fetching order details:', err);
-                setError('Failed to load order details.');
-            } finally {
-                setLoading(false);
+            } else {
+                setError('Order details could not be retrieved. Order may not exist or server error.');
+                setOrder(null); // Ensure order is null if fetch failed
             }
-        };
+        } catch (err) {
+            console.error('Error fetching order details:', err);
+            setError(`Failed to load order details: ${err.message || 'Unknown error'}. Check server connection.`);
+        } finally {
+            setLoading(false);
+        }
+    }, [orderId, orderType]);
 
-        fetchOrderDetails();
-
-        // Start location tracking
-        startLocationTracking();
+    useEffect(() => {
+        if (orderId && orderType) {
+            fetchOrderDetails();
+            startLocationTracking();
+        } else {
+            setError('Order ID or Type is missing.');
+            setLoading(false);
+        }
 
         return () => {
-            // Cleanup: Unsubscribe from location updates
             if (locationSubscription.current) {
                 locationSubscription.current.remove();
             }
         };
-    }, [orderId, orderType]);
+    }, [orderId, orderType, fetchOrderDetails]);
 
     const startLocationTracking = async () => {
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Permission to access location was denied. Cannot track driver location.');
+            Alert.alert('Permission Denied', 'Permission to access location was denied.');
             setError('Location permission denied.');
             return;
         }
@@ -88,8 +94,8 @@ export default function DeliveryScreen() {
         locationSubscription.current = await Location.watchPositionAsync(
             {
                 accuracy: Location.Accuracy.High,
-                timeInterval: 5000, // Update every 5 seconds
-                distanceInterval: 10, // Update if moved by 10 meters
+                timeInterval: 5000,
+                distanceInterval: 10,
             },
             (location) => {
                 const newLocation = {
@@ -100,12 +106,11 @@ export default function DeliveryScreen() {
                 };
                 setDriverLocation(newLocation);
                 sendDriverLocationToServer(newLocation.latitude, newLocation.longitude);
-                
-                // If using WebView, send location to HTML map
+
                 if (webViewRef.current && destinationLocation) {
                     const message = JSON.stringify({
                         type: 'updateLocation',
-                        driver: newLocation,
+                        driver: { latitude: newLocation.latitude, longitude: newLocation.longitude },
                         destination: destinationLocation,
                     });
                     webViewRef.current.postMessage(message);
@@ -116,31 +121,123 @@ export default function DeliveryScreen() {
 
     const sendDriverLocationToServer = async (latitude, longitude) => {
         try {
-            await apiRequest.post(`${BASE_URL}/admin/delivery/${orderId}/update-location`, {
+            await deliveryApiRequest('post', `/delivery.php?action=update-location&orderId=${orderId}&orderType=${orderType}`, {
                 latitude,
                 longitude,
             });
             console.log('Driver location sent to server successfully.');
         } catch (err) {
-            console.error('Failed to send driver location to server:', err);
-            // You might want to handle this error more gracefully, e.g., show a toast
+            console.error('Failed to send driver location:', err);
+        }
+    };
+
+    // Helper function to calculate distance between two lat/lng points (Haversine formula)
+    const calculateDistance = (lat1, lon1, lat2, lon2) => {
+        const R = 6371; // Radius of Earth in kilometers
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distance = R * c; // Distance in km
+        return distance * 1000; // Return distance in meters
+    };
+
+    const handleStartDelivery = async () => {
+        if (!orderId || !orderType) {
+            Alert.alert('Error', 'Order ID or Type missing. Cannot start delivery.');
+            return;
+        }
+        Alert.alert(
+            'Confirm Start Delivery',
+            'Are you sure you want to start this delivery?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Yes',
+                    onPress: async () => {
+                        try {
+                            await deliveryApiRequest('post', `/delivery.php?action=update-status&orderId=${orderId}&orderType=${orderType}`, {
+                                status: 'delivering',
+                            });
+                            Alert.alert('Success', 'Order status updated to "Delivering".');
+                            fetchOrderDetails(); // Re-fetch to update local state
+                        } catch (err) {
+                            console.error('Failed to start delivery:', err);
+                            Alert.alert('Error', 'Failed to update status to "Delivering". Please try again.');
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    const handleMarkAsDelivered = async () => {
+        if (!driverLocation || !destinationLocation) {
+            Alert.alert('Error', 'Cannot mark as delivered. Driver location or destination missing.');
+            return;
+        }
+        if (!orderId || !orderType) {
+            Alert.alert('Error', 'Order ID or Type missing. Cannot mark as delivered.');
+            return;
+        }
+
+        const distance = calculateDistance(
+            driverLocation.latitude,
+            driverLocation.longitude,
+            destinationLocation.latitude,
+            destinationLocation.longitude
+        );
+
+        const deliveryThresholdMeters = 50; // Example: within 50 meters of the destination
+
+        if (distance <= deliveryThresholdMeters) {
+            Alert.alert(
+                'Confirm Delivery',
+                'Are you sure you want to mark this order as delivered?',
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Yes',
+                        onPress: async () => {
+                            try {
+                                await deliveryApiRequest('post', `/delivery.php?action=update-status&orderId=${orderId}&orderType=${orderType}`, {
+                                    status: 'delivered',
+                                });
+                                Alert.alert('Success', 'Order marked as Delivered!');
+                                // You might want to navigate back or to another screen here
+                                router.back();
+                            } catch (err) {
+                                console.error('Failed to mark as delivered:', err);
+                                Alert.alert('Error', 'Failed to mark order as delivered. Please try again.');
+                            }
+                        },
+                    },
+                ]
+            );
+        } else {
+            Alert.alert(
+                'Location Mismatch',
+                `You are ${distance.toFixed(0)} meters away from the delivery location. You must be within ${deliveryThresholdMeters} meters to mark as delivered.`,
+                [{ text: 'OK' }]
+            );
         }
     };
 
     const handleWebViewMessage = (event) => {
         const data = JSON.parse(event.nativeEvent.data);
         if (data.type === 'mapReady') {
-            // Map is ready, send initial driver and destination locations
             if (driverLocation && destinationLocation) {
                 const message = JSON.stringify({
                     type: 'updateLocation',
-                    driver: driverLocation,
+                    driver: { latitude: driverLocation.latitude, longitude: driverLocation.longitude },
                     destination: destinationLocation,
                 });
                 webViewRef.current.postMessage(message);
             }
         }
-        // Handle other messages from the WebView if needed
     };
 
     if (loading) {
@@ -166,7 +263,7 @@ export default function DeliveryScreen() {
     if (!order) {
         return (
             <View style={styles.centered}>
-                <Text style={styles.noOrderText}>Order not found.</Text>
+                <Text style={styles.noOrderText}>Order not found or could not be loaded.</Text>
                 <Pressable onPress={() => router.back()} style={styles.backButton}>
                     <Text style={styles.backButtonText}>Go Back</Text>
                 </Pressable>
@@ -184,45 +281,48 @@ export default function DeliveryScreen() {
             </View>
 
             <View style={styles.infoCard}>
-                <Text style={styles.infoTitle}>Customer: {order.user?.first_name} {order.user?.last_name}</Text>
-                <Text style={styles.infoText}>Status: {order.status.charAt(0).toUpperCase() + order.status.slice(1)}</Text>
-                {/* Display other relevant order details */}
+                <Text style={styles.infoTitle}>Customer: {order.user?.first_name || 'N/A'} {order.user?.last_name || 'N/A'}</Text>
+                <Text style={styles.infoText}>Status: {order.status ? (order.status.charAt(0).toUpperCase() + order.status.slice(1)) : 'N/A'}</Text>
                 <Text style={styles.infoText}>Delivery Address: {order.delivery_location?.address || 'N/A'}</Text>
             </View>
 
-            {/* Map Section */}
-            {mapHtmlContent ? (
-                <View style={styles.mapContainer}>
-                    <WebView
-                        ref={webViewRef}
-                        originWhitelist={['*']}
-                        source={{ html: mapHtmlContent }}
-                        style={styles.mapWebView}
-                        onMessage={handleWebViewMessage}
-                        javaScriptEnabled={true}
-                        domStorageEnabled={true}
-                        allowFileAccess={true}
-                        allowUniversalAccessFromFileURLs={true}
-                    />
-                </View>
-            ) : (
-                <View style={styles.mapContainer}>
-                    <Text style={styles.mapPlaceholderText}>Loading map...</Text>
-                </View>
-            )}
+            <View style={styles.mapContainer}>
+                <WebView
+                    ref={webViewRef}
+                    originWhitelist={['*']}
+                    source={MAP_HTML_SOURCE} // Use the required HTML file
+                    style={styles.mapWebView}
+                    onMessage={handleWebViewMessage}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    allowFileAccess={true}
+                    allowUniversalAccessFromFileURLs={true}
+                />
+            </View>
 
             {driverLocation && (
                 <View style={styles.locationDebug}>
                     <Text style={styles.locationDebugText}>Driver Lat: {driverLocation.latitude.toFixed(6)}</Text>
                     <Text style={styles.locationDebugText}>Driver Lng: {driverLocation.longitude.toFixed(6)}</Text>
+                    {destinationLocation && (
+                        <Text style={styles.locationDebugText}>
+                            Distance to dest: {calculateDistance(driverLocation.latitude, driverLocation.longitude, destinationLocation.latitude, destinationLocation.longitude).toFixed(0)} meters
+                        </Text>
+                    )}
                 </View>
             )}
 
             <View style={styles.actionsContainer}>
-                <Pressable style={styles.actionButton}>
-                    <Text style={styles.actionButtonText}>Mark as Delivered</Text>
-                </Pressable>
-                {/* Add other actions like 'Call Customer' etc. */}
+                {order.status !== 'delivering' && order.status !== 'delivered' && (
+                    <Pressable style={[styles.actionButton, styles.startButton]} onPress={handleStartDelivery}>
+                        <Text style={styles.actionButtonText}>Start Delivery</Text>
+                    </Pressable>
+                )}
+                {order.status === 'delivering' && ( // Only show "Mark Delivered" if status is 'delivering'
+                    <Pressable style={styles.actionButton} onPress={handleMarkAsDelivered}>
+                        <Text style={styles.actionButtonText}>Mark as Delivered</Text>
+                    </Pressable>
+                )}
             </View>
         </View>
     );
@@ -305,7 +405,7 @@ const styles = StyleSheet.create({
         borderRadius: 15,
         overflow: 'hidden',
         marginBottom: 20,
-        backgroundColor: '#EAECEE', // Placeholder background
+        backgroundColor: '#EAECEE',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -343,6 +443,9 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.3,
         shadowRadius: 5,
         elevation: 5,
+    },
+    startButton: {
+        backgroundColor: '#007bff', // A different color for 'Start Delivery'
     },
     actionButtonText: {
         color: '#FFFFFF',

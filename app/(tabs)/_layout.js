@@ -1,7 +1,5 @@
-// app/(tabs)/_layout.js
-
 import { Tabs } from 'expo-router';
-import { StyleSheet } from 'react-native'; // <-- Corrected import
+import { StyleSheet, Text } from 'react-native'; // Added Text import
 import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function TabLayout() {
@@ -16,38 +14,51 @@ export default function TabLayout() {
         tabBarItemStyle: styles.tabBarItem,
       }}
     >
- 
       <Tabs.Screen
         name="home"
         options={{
-          title: 'Home',
+          // Changed 'title' to 'headerTitle' and wrapped in a function returning Text
+          headerTitle: () => <Text style={styles.headerTitleText}>Home</Text>,
+          // Explicitly define tabBarLabel wrapped in Text
+          tabBarLabel: ({ color, focused }) => (
+            <Text style={[styles.tabBarLabel, { color }]}>Home</Text>
+          ),
           tabBarIcon: ({ color }) => <Icon name="home" color={color} size={24} />,
         }}
       />
       <Tabs.Screen
         name="chat"
         options={{
-          title: 'Chat',
+          headerTitle: () => <Text style={styles.headerTitleText}>Chat</Text>,
+          tabBarLabel: ({ color, focused }) => (
+            <Text style={[styles.tabBarLabel, { color }]}>Chat</Text>
+          ),
           tabBarIcon: ({ color }) => <Icon name="chatbubbles" color={color} size={24} />,
         }}
       />
       <Tabs.Screen
         name="gatheringOrder"
         options={{
-          title: 'Orders',
+          headerTitle: () => <Text style={styles.headerTitleText}>Orders</Text>,
+          tabBarLabel: ({ color, focused }) => (
+            <Text style={[styles.tabBarLabel, { color }]}>Orders</Text>
+          ),
           tabBarIcon: ({ color }) => <Icon name="list" color={color} size={24} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Settings',
+          headerTitle: () => <Text style={styles.headerTitleText}>Settings</Text>,
+          tabBarLabel: ({ color, focused }) => (
+            <Text style={[styles.tabBarLabel, { color }]}>Settings</Text>
+          ),
           tabBarIcon: ({ color }) => <Icon name="settings" color={color} size={24} />,
         }}
       />
 
       {/* Hidden screens (href: null) for navigation that don't appear in the tab bar.
-          Ensure these names match your file structure exactly. */}
+          These do not need headerTitle or tabBarLabel as they are hidden. */}
       <Tabs.Screen
         name="gathering"
         options={{
@@ -118,5 +129,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 5,
+  },
+  headerTitleText: {
+    fontSize: 18, // Adjust as needed for your header
+    fontWeight: 'bold',
+    color: '#333', // Adjust as needed for your header
   },
 });

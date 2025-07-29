@@ -6,7 +6,7 @@ header("Access-Control-Allow-Headers: Content-Type");
 
 $dbHost = "localhost";
 $dbUser = "root";
-$dbPass = "";
+$dbPass = "teamvanguard";
 $dbName = "kocenpto"; 
 
 $conn = new mysqli($dbHost, $dbUser, $dbPass, $dbName);

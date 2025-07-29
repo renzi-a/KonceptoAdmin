@@ -12,14 +12,10 @@ import {
   Pressable,
   SafeAreaView,
   StyleSheet,
-  Text,
+  Text, // Ensure Text is imported
   TextInput,
   View,
 } from 'react-native';
-
-// Assuming you have a separate constants file for these
-// For this example, I'll define them here for clarity
-const BASE_STORAGE_URL = 'http://kocenpto.test';
 
 const Colors = {
   primaryGreen: '#22c55e',
@@ -122,7 +118,7 @@ export default function GatheringOrderScreen() {
       const newGatheredCount = updatedItems.filter((item) => item.gathered).length;
       if (newGatheredCount === updatedItems.length) {
         // All items are gathered, update order status to 'to be delivered'
-        if (order?.status !== 'to be delivered') { // Prevent unnecessary calls
+        if (order?.status !== 'to be delivered') {
           await updateOrderStatus('to be delivered');
         }
       } else if (order?.status === 'to be delivered' && newGatheredCount < updatedItems.length) {
@@ -194,7 +190,6 @@ export default function GatheringOrderScreen() {
     }
   };
 
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -221,6 +216,7 @@ export default function GatheringOrderScreen() {
     );
   }
 
+  // --- Start of JSX return ---
   return (
     <SafeAreaView style={styles.safeArea}>
       <Animated.View
@@ -232,8 +228,11 @@ export default function GatheringOrderScreen() {
         ]}
       >
         <View style={styles.headerRow}>
+          {/* FIX: Ensure dynamic text is properly rendered within Text components */}
           <Text style={styles.headerTitle}>
-            {`Order #${order?.id} Gathering`}
+            Order #
+            <Text style={{fontWeight: '800', color: Colors.darkText}}>{order?.id || 'N/A'}</Text> {/* Specific Text for ID */}
+            <Text> Gathering</Text> {/* Specific Text for static part */}
           </Text>
           <Pressable
             onPress={() => router.back()}
@@ -250,9 +249,10 @@ export default function GatheringOrderScreen() {
         </View>
 
         <Animated.View style={[styles.schoolInfoCard, { height: schoolInfoHeight, opacity: schoolInfoOpacity }]}>
+          {/* FIX: Conditional rendering for image source */}
           {order?.user?.school?.image ? (
             <Image
-              source={{ uri: `${BASE_STORAGE_URL}/storage/logos/${order.user.school.image}` }}
+              source={{ uri: `http://192.168.1.12:8000/storage/logos/${order.user.school.image}` }}
               style={styles.schoolImage}
               resizeMode="cover"
             />
@@ -265,11 +265,15 @@ export default function GatheringOrderScreen() {
           <View style={styles.schoolDetails}>
             <Text style={styles.schoolDetailText}>
               <Text style={styles.schoolDetailLabel}>School: </Text>
-              {order?.user?.school?.school_name || 'N/A'}
+              {/* FIX: Explicitly handle potential null/undefined with || 'N/A' */}
+              <Text style={styles.schoolDetailValue}>{order?.user?.school?.school_name || 'N/A'}</Text>
             </Text>
             <Text style={styles.schoolDetailText}>
               <Text style={styles.schoolDetailLabel}>Admin: </Text>
-              {`${order?.user?.first_name} ${order?.user?.last_name}`}
+              {/* FIX: Explicitly handle potential null/undefined for first/last name */}
+              <Text style={styles.schoolDetailValue}>
+                {order?.user ? `${order.user.first_name || ''} ${order.user.last_name || ''}`.trim() || 'N/A' : 'N/A'}
+              </Text>
             </Text>
           </View>
         </Animated.View>
@@ -323,9 +327,10 @@ export default function GatheringOrderScreen() {
               <Text style={styles.itemIndex}>{index + 1}.</Text>
 
               <View style={styles.itemPhotoContainer}>
+                {/* FIX: Conditional rendering for item photo */}
                 {item.photo ? (
                   <Image
-                    source={{ uri: `${BASE_STORAGE_URL}/custom-order-images/${item.photo}` }}
+                    source={{ uri: `http://192.168.1.2:8000/custom-order-images/${item.photo}` }}
                     style={styles.itemPhoto}
                     resizeMode="cover"
                   />
@@ -503,6 +508,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     color: Colors.darkText,
+    // Note: If you want 'Order #123 Gathering' to have consistent styling,
+    // you might remove specific Text styles inside and apply here,
+    // then use a single Text component with a combined string.
+    // E.g., <Text style={styles.headerTitle}>{`Order #${order?.id || 'N/A'} Gathering`}</Text>
+    // But separating them as done in the fix is safer for text warnings.
   },
   backButtonHeader: {
     flexDirection: 'row',

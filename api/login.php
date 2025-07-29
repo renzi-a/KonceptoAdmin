@@ -26,7 +26,7 @@ ini_set('error_log', __DIR__ . '/php_error.log'); // Logs errors to a file next 
 // !!! IMPORTANT: Replace with your actual database credentials !!!
 $dbHost = "localhost";
 $dbUser = "root";
-$dbPass = "";
+$dbPass = "teamvanguard";
 $dbName = "kocenpto";
 
 // Establish database connection
