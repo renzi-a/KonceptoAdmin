@@ -37,15 +37,16 @@ export const apiRequest = async (method, endpoint, data = null, headers = {}) =>
   }
 };
 
-// New function specifically for delivery-related API calls
 export const deliveryApiRequest = async (method, endpoint, data = null, headers = {}) => {
   try {
-    // This function will hit the endpoint directly, e.g., /delivery.php
+    // Ensure correct formatting of URL
+    const url = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
     const config = {
       method,
-      url: endpoint, // The endpoint will directly be '/delivery.php?...'
+      url,
       headers: { ...apiClient.defaults.headers.common, ...headers },
-      data: data,
+      data,
     };
 
     const response = await apiClient(config);
@@ -56,6 +57,7 @@ export const deliveryApiRequest = async (method, endpoint, data = null, headers 
     throw error;
   }
 };
+
 
 
 // Function to handle user login

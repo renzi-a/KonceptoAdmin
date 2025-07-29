@@ -1,6 +1,7 @@
 // app/(tabs)/order/delivery.js
 
-import { deliveryApiRequest } from '@/services/api'; // Correct import for delivery-specific API
+import { deliveryApiRequest } from '@/services/api';
+import { Asset } from 'expo-asset'; // Import Asset from expo-asset
 import * as Location from 'expo-location';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -13,15 +14,12 @@ const LATITUDE_DELTA = 0.0922;
 const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 
 // --- IMPORTANT: This path is confirmed correct for KonceptoAdmin/assets/map.html ---
-// Assuming your project root is 'KonceptoAdmin'
-// From 'app/(tabs)/order/delivery.js' up three levels to 'KonceptoAdmin/', then into 'assets/'
-const MAP_HTML_SOURCE = require('../../../assets/map.html');
+const MAP_HTML_FILE = require('../../../assets/map.html'); // Keep as require
 // --- END IMPORTANT ---
 
 export default function DeliveryScreen() {
     const { orderId, orderType } = useLocalSearchParams();
 
-    // >>> THIS IS THE CONSOLE.LOG YOU SHOULD CHECK <<<
     console.log('Parameters received in DeliveryScreen:', { orderId, orderType });
 
     const [loading, setLoading] = useState(true);
@@ -29,20 +27,37 @@ export default function DeliveryScreen() {
     const [order, setOrder] = useState(null);
     const [driverLocation, setDriverLocation] = useState(null);
     const [destinationLocation, setDestinationLocation] = useState(null);
+    const [mapHtmlUri, setMapHtmlUri] = useState(null); // New state for the HTML file URI
     const locationSubscription = useRef(null);
     const webViewRef = useRef(null);
+
+    // Function to load the local HTML asset
+    const loadHtmlAsset = async () => {
+        try {
+            const asset = Asset.fromModule(MAP_HTML_FILE);
+            if (!asset.localUri) {
+                // Ensure the asset is loaded and localUri is available
+                await asset.downloadAsync();
+            }
+            console.log('MAP_HTML_FILE URI for WebView:', asset.localUri);
+            setMapHtmlUri(asset.localUri);
+        } catch (err) {
+            console.error('Error loading HTML asset:', err);
+            setError('Failed to load map file.');
+        }
+    };
 
     const fetchOrderDetails = useCallback(async () => {
         try {
             const response = await deliveryApiRequest('get', `/delivery.php?orderId=${orderId}&orderType=${orderType}`);
-            
-            // Check if response and response.order are valid before setting state
+            console.log("✅ Raw delivery API response:", response);
+
             if (response && response.order) {
                 setOrder(response.order);
 
-                // Safely access delivery_location with optional chaining
                 if (response.order.delivery_location) {
                     const { latitude, longitude } = response.order.delivery_location;
+
                     if (latitude && longitude && !isNaN(parseFloat(latitude)) && !isNaN(parseFloat(longitude))) {
                         setDestinationLocation({
                             latitude: parseFloat(latitude),
@@ -56,32 +71,40 @@ export default function DeliveryScreen() {
                     setError('Delivery location not found for this order.');
                 }
             } else {
+                console.warn("⚠️ No order returned in response");
                 setError('Order details could not be retrieved. Order may not exist or server error.');
-                setOrder(null); // Ensure order is null if fetch failed
+                setOrder(null);
             }
         } catch (err) {
             console.error('Error fetching order details:', err);
             setError(`Failed to load order details: ${err.message || 'Unknown error'}. Check server connection.`);
         } finally {
-            setLoading(false);
+            // Only set loading to false after both order details and HTML asset are ready
+            // We'll manage this in a combined effect/logic.
         }
     }, [orderId, orderType]);
 
     useEffect(() => {
-        if (orderId && orderType) {
-            fetchOrderDetails();
-            startLocationTracking();
-        } else {
-            setError('Order ID or Type is missing.');
-            setLoading(false);
-        }
+        const init = async () => {
+            if (orderId && orderType) {
+                setLoading(true); // Start loading
+                await loadHtmlAsset(); // Load HTML asset first
+                await fetchOrderDetails(); // Then fetch order details
+                startLocationTracking();
+                setLoading(false); // End loading
+            } else {
+                setError('Order ID or Type is missing.');
+                setLoading(false);
+            }
+        };
+        init();
 
         return () => {
             if (locationSubscription.current) {
                 locationSubscription.current.remove();
             }
         };
-    }, [orderId, orderType, fetchOrderDetails]);
+    }, [orderId, orderType, fetchOrderDetails]); // Include fetchOrderDetails in deps
 
     const startLocationTracking = async () => {
         let { status } = await Location.requestForegroundPermissionsAsync();
@@ -103,15 +126,18 @@ export default function DeliveryScreen() {
                     longitude: location.coords.longitude,
                     latitudeDelta: LATITUDE_DELTA,
                     longitudeDelta: LONGITUDE_DELTA,
+                    accuracy: location.coords.accuracy,
                 };
                 setDriverLocation(newLocation);
                 sendDriverLocationToServer(newLocation.latitude, newLocation.longitude);
 
                 if (webViewRef.current && destinationLocation) {
                     const message = JSON.stringify({
-                        type: 'updateLocation',
-                        driver: { latitude: newLocation.latitude, longitude: newLocation.longitude },
-                        destination: destinationLocation,
+                        type: 'UPDATE_MAP',
+                        payload: {
+                            driverLocation: { latitude: newLocation.latitude, longitude: newLocation.longitude, accuracy: newLocation.accuracy },
+                            destinationLocation: destinationLocation,
+                        },
                     });
                     webViewRef.current.postMessage(message);
                 }
@@ -131,9 +157,8 @@ export default function DeliveryScreen() {
         }
     };
 
-    // Helper function to calculate distance between two lat/lng points (Haversine formula)
     const calculateDistance = (lat1, lon1, lat2, lon2) => {
-        const R = 6371; // Radius of Earth in kilometers
+        const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
         const a =
@@ -141,8 +166,8 @@ export default function DeliveryScreen() {
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLon / 2) * Math.sin(dLon / 2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const distance = R * c; // Distance in km
-        return distance * 1000; // Return distance in meters
+        const distance = R * c;
+        return distance * 1000;
     };
 
     const handleStartDelivery = async () => {
@@ -163,7 +188,7 @@ export default function DeliveryScreen() {
                                 status: 'delivering',
                             });
                             Alert.alert('Success', 'Order status updated to "Delivering".');
-                            fetchOrderDetails(); // Re-fetch to update local state
+                            fetchOrderDetails();
                         } catch (err) {
                             console.error('Failed to start delivery:', err);
                             Alert.alert('Error', 'Failed to update status to "Delivering". Please try again.');
@@ -191,7 +216,7 @@ export default function DeliveryScreen() {
             destinationLocation.longitude
         );
 
-        const deliveryThresholdMeters = 50; // Example: within 50 meters of the destination
+        const deliveryThresholdMeters = 50;
 
         if (distance <= deliveryThresholdMeters) {
             Alert.alert(
@@ -207,7 +232,6 @@ export default function DeliveryScreen() {
                                     status: 'delivered',
                                 });
                                 Alert.alert('Success', 'Order marked as Delivered!');
-                                // You might want to navigate back or to another screen here
                                 router.back();
                             } catch (err) {
                                 console.error('Failed to mark as delivered:', err);
@@ -228,23 +252,29 @@ export default function DeliveryScreen() {
 
     const handleWebViewMessage = (event) => {
         const data = JSON.parse(event.nativeEvent.data);
-        if (data.type === 'mapReady') {
+        if (data.type === 'MAP_READY') {
+            console.log("RN: WebView reported MAP_READY.");
             if (driverLocation && destinationLocation) {
                 const message = JSON.stringify({
-                    type: 'updateLocation',
-                    driver: { latitude: driverLocation.latitude, longitude: driverLocation.longitude },
-                    destination: destinationLocation,
+                    type: 'UPDATE_MAP',
+                    payload: {
+                        driverLocation: { latitude: driverLocation.latitude, longitude: driverLocation.longitude, accuracy: driverLocation.accuracy || 0 },
+                        destinationLocation: destinationLocation,
+                    },
                 });
                 webViewRef.current.postMessage(message);
+                console.log("RN: Sent initial map update to WebView.");
+            } else {
+                console.warn("RN: MAP_READY received, but driver/destination location not yet available for initial update.");
             }
         }
     };
 
-    if (loading) {
+    if (loading || !mapHtmlUri) { // Added !mapHtmlUri to loading check
         return (
             <View style={styles.centered}>
                 <ActivityIndicator size="large" color="#10B981" />
-                <Text style={styles.loadingText}>Loading order details...</Text>
+                <Text style={styles.loadingText}>Loading map and order details...</Text>
             </View>
         );
     }
@@ -287,17 +317,31 @@ export default function DeliveryScreen() {
             </View>
 
             <View style={styles.mapContainer}>
-                <WebView
-                    ref={webViewRef}
-                    originWhitelist={['*']}
-                    source={MAP_HTML_SOURCE} // Use the required HTML file
-                    style={styles.mapWebView}
-                    onMessage={handleWebViewMessage}
-                    javaScriptEnabled={true}
-                    domStorageEnabled={true}
-                    allowFileAccess={true}
-                    allowUniversalAccessFromFileURLs={true}
-                />
+                {mapHtmlUri && ( // Render WebView only when mapHtmlUri is available
+                    <WebView
+                        ref={webViewRef}
+                        originWhitelist={['*']}
+                        source={{ uri: mapHtmlUri }} // Use the dynamically loaded file URI
+                        style={styles.mapWebView}
+                        onMessage={handleWebViewMessage}
+                        javaScriptEnabled={true}
+                        domStorageEnabled={true}
+                        allowFileAccess={true}
+                        allowUniversalAccessFromFileURLs={true}
+                        onLoad={(syntheticEvent) => {
+                            const { nativeEvent } = syntheticEvent;
+                            console.log('WebView onLoad: URL:', nativeEvent.url, 'Loading:', nativeEvent.loading);
+                            if (nativeEvent.url && !nativeEvent.url.startsWith('file://')) {
+                                console.warn("WebView loaded an unexpected URL. Expected a 'file://' URL for local HTML. Got:", nativeEvent.url);
+                            }
+                        }}
+                        onError={(syntheticEvent) => {
+                            const { nativeEvent } = syntheticEvent;
+                            console.error('WebView onError:', nativeEvent);
+                            Alert.alert('Map Load Error', `Failed to load map: ${nativeEvent.description || 'Unknown WebView Error'}. Check console for details.`);
+                        }}
+                    />
+                )}
             </View>
 
             {driverLocation && (
@@ -318,7 +362,7 @@ export default function DeliveryScreen() {
                         <Text style={styles.actionButtonText}>Start Delivery</Text>
                     </Pressable>
                 )}
-                {order.status === 'delivering' && ( // Only show "Mark Delivered" if status is 'delivering'
+                {order.status === 'delivering' && (
                     <Pressable style={styles.actionButton} onPress={handleMarkAsDelivered}>
                         <Text style={styles.actionButtonText}>Mark as Delivered</Text>
                     </Pressable>
@@ -331,125 +375,121 @@ export default function DeliveryScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F0F4F8',
-        padding: 20,
+        backgroundColor: '#f8f8f8',
     },
     centered: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#F0F4F8',
+        padding: 20,
     },
     loadingText: {
         marginTop: 10,
         fontSize: 16,
-        color: '#5D6D7E',
+        color: '#555',
     },
     errorText: {
         fontSize: 16,
-        color: '#E74C3C',
+        color: '#D9534F',
         textAlign: 'center',
         marginBottom: 20,
     },
     noOrderText: {
         fontSize: 16,
-        color: '#85929E',
+        color: '#555',
         textAlign: 'center',
         marginBottom: 20,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 25,
+        padding: 15,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#eee',
+        paddingTop: 50,
     },
     backButton: {
-        marginRight: 15,
-        padding: 8,
-        borderRadius: 8,
-        backgroundColor: '#E0E6ED',
+        padding: 10,
     },
     backButtonText: {
         fontSize: 16,
-        color: '#34495E',
-        fontWeight: '600',
+        color: '#007AFF',
     },
     headerTitle: {
-        fontSize: 24,
-        fontWeight: '700',
-        color: '#2C3E50',
+        flex: 1,
+        fontSize: 18,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        marginRight: 40,
     },
     infoCard: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 15,
-        padding: 20,
-        marginBottom: 20,
+        backgroundColor: '#fff',
+        margin: 15,
+        padding: 15,
+        borderRadius: 8,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 6,
-        elevation: 5,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 1.41,
+        elevation: 2,
     },
     infoTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#34495E',
-        marginBottom: 10,
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 5,
+        color: '#333',
     },
     infoText: {
-        fontSize: 16,
-        color: '#5D6D7E',
-        marginBottom: 5,
+        fontSize: 14,
+        color: '#666',
+        marginBottom: 3,
     },
     mapContainer: {
         flex: 1,
-        borderRadius: 15,
+        backgroundColor: '#e0e0e0',
+        marginHorizontal: 15,
+        marginBottom: 15,
+        borderRadius: 8,
         overflow: 'hidden',
-        marginBottom: 20,
-        backgroundColor: '#EAECEE',
-        justifyContent: 'center',
-        alignItems: 'center',
     },
     mapWebView: {
-        width: '100%',
-        height: '100%',
-    },
-    mapPlaceholderText: {
-        color: '#85929E',
-        fontSize: 16,
+        flex: 1,
     },
     locationDebug: {
+        backgroundColor: '#f0f0f0',
         padding: 10,
-        backgroundColor: '#EBF5FB',
-        borderRadius: 10,
-        marginBottom: 20,
+        marginHorizontal: 15,
+        borderRadius: 8,
+        marginBottom: 15,
     },
     locationDebugText: {
-        fontSize: 14,
-        color: '#34495E',
+        fontSize: 12,
+        color: '#555',
     },
     actionsContainer: {
+        padding: 15,
+        backgroundColor: '#fff',
+        borderTopWidth: 1,
+        borderTopColor: '#eee',
         flexDirection: 'row',
         justifyContent: 'space-around',
-        alignItems: 'center',
-        paddingVertical: 10,
     },
     actionButton: {
-        backgroundColor: '#28B463',
-        paddingVertical: 15,
+        backgroundColor: '#10B981',
+        paddingVertical: 12,
         paddingHorizontal: 25,
-        borderRadius: 10,
-        shadowColor: '#28B463',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-        elevation: 5,
+        borderRadius: 25,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 150,
     },
     startButton: {
-        backgroundColor: '#007bff', // A different color for 'Start Delivery'
+        backgroundColor: '#007AFF',
     },
     actionButtonText: {
-        color: '#FFFFFF',
+        color: '#fff',
         fontSize: 16,
-        fontWeight: '700',
+        fontWeight: 'bold',
     },
 });

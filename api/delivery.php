@@ -40,11 +40,11 @@ if ($orderId !== null && $action === null) {
 
     if ($orderType === 'custom') {
         $stmt = $pdo->prepare("
-            SELECT co.*, u.name AS user_full_name, u.phone_number, u.email,
-                   s.address AS school_address, s.latitude AS school_latitude, s.longitude AS school_longitude
+            SELECT co.*, CONCAT(u.first_name, ' ', u.last_name) AS user_full_name, u.cp_no, u.email,
+                s.address AS school_address, s.lat AS school_latitude, s.lng AS school_longitude
             FROM custom_orders co
             LEFT JOIN users u ON co.user_id = u.id
-            LEFT JOIN schools s ON co.school_id = s.id
+            LEFT JOIN schools s ON u.school_id = s.id
             WHERE co.id = ?
         ");
         $stmt->execute([$orderId]);
@@ -55,43 +55,36 @@ if ($orderId !== null && $action === null) {
             $stmtItems->execute([$orderId]);
             $items = $stmtItems->fetchAll();
 
-            // Structure user data
             $order['user'] = [
                 'id' => $order['user_id'] ?? null,
-                'name' => $order['user_full_name'] ?? 'N/A', // Use 'user_full_name' alias
-                'first_name' => explode(' ', $order['user_full_name'])[0] ?? 'N/A', // Attempt to derive first name
-                'last_name' => isset(explode(' ', $order['user_full_name'])[1]) ? implode(' ', array_slice(explode(' ', $order['user_full_name']), 1)) : 'N/A', // Attempt to derive last name
-                'phone_number' => $order['phone_number'] ?? 'N/A',
+                'name' => $order['user_full_name'] ?? 'N/A',
+                'first_name' => explode(' ', $order['user_full_name'])[0] ?? 'N/A',
+                'last_name' => isset(explode(' ', $order['user_full_name'])[1]) ? implode(' ', array_slice(explode(' ', $order['user_full_name']), 1)) : 'N/A',
+                'phone_number' => $order['cp_no'] ?? 'N/A',
                 'email' => $order['email'] ?? 'N/A'
             ];
 
-            // Structure delivery location. Prioritize school location if available.
             if (!empty($order['school_address']) && !empty($order['school_latitude']) && !empty($order['school_longitude'])) {
                 $order['delivery_location'] = [
                     'address' => $order['school_address'],
-                    'latitude' => (float)$order['school_latitude'], // Cast to float
-                    'longitude' => (float)$order['school_longitude'] // Cast to float
+                    'latitude' => (float)$order['school_latitude'],
+                    'longitude' => (float)$order['school_longitude']
                 ];
-            } elseif (isset($order['delivery_location'])) { // Fallback to delivery_location column if school data is missing
-                   $decodedLocation = json_decode($order['delivery_location'], true);
-                   if (json_last_error() === JSON_ERROR_NONE) {
-                       $order['delivery_location'] = $decodedLocation;
-                   } else {
-                       $order['delivery_location'] = null; // Set to null if decoding fails
-                   }
+            } elseif (isset($order['delivery_location'])) {
+                $decodedLocation = json_decode($order['delivery_location'], true);
+                $order['delivery_location'] = (json_last_error() === JSON_ERROR_NONE) ? $decodedLocation : null;
             } else {
                 $order['delivery_location'] = null;
             }
 
-            // Remove redundant top-level fields
-            unset($order['user_full_name'], $order['phone_number'], $order['email']); // Unset the new alias and original redundant fields
+            unset($order['user_full_name'], $order['cp_no'], $order['email']);
             unset($order['school_address'], $order['school_latitude'], $order['school_longitude']);
         }
 
-    } else { // 'normal' or default order type
+    } else {
         $stmt = $pdo->prepare("
-            SELECT o.*, u.name AS user_full_name, u.phone_number, u.email,
-                   s.address AS school_address, s.latitude AS school_latitude, s.longitude AS school_longitude
+            SELECT o.*, CONCAT(u.first_name, ' ', u.last_name) AS user_full_name, u.cp_no, u.email,
+                   s.address AS school_address, s.lat AS school_latitude, s.lng AS school_longitude
             FROM orders o
             LEFT JOIN users u ON o.user_id = u.id
             LEFT JOIN schools s ON o.school_id = s.id
@@ -101,41 +94,33 @@ if ($orderId !== null && $action === null) {
         $order = $stmt->fetch();
 
         if ($order) {
-            // Corrected table name for normal order items (from order_items to order_details)
             $stmtItems = $pdo->prepare("SELECT * FROM order_details WHERE order_id = ?");
             $stmtItems->execute([$orderId]);
             $items = $stmtItems->fetchAll();
 
-            // Structure user data
             $order['user'] = [
                 'id' => $order['user_id'] ?? null,
                 'name' => $order['user_full_name'] ?? 'N/A',
                 'first_name' => explode(' ', $order['user_full_name'])[0] ?? 'N/A',
                 'last_name' => isset(explode(' ', $order['user_full_name'])[1]) ? implode(' ', array_slice(explode(' ', $order['user_full_name']), 1)) : 'N/A',
-                'phone_number' => $order['phone_number'] ?? 'N/A',
+                'phone_number' => $order['cp_no'] ?? 'N/A',
                 'email' => $order['email'] ?? 'N/A'
             ];
 
-            // Structure delivery location. Prioritize school location if available.
             if (!empty($order['school_address']) && !empty($order['school_latitude']) && !empty($order['school_longitude'])) {
                 $order['delivery_location'] = [
                     'address' => $order['school_address'],
-                    'latitude' => (float)$order['school_latitude'], // Cast to float
-                    'longitude' => (float)$order['school_longitude'] // Cast to float
+                    'latitude' => (float)$order['school_latitude'],
+                    'longitude' => (float)$order['school_longitude']
                 ];
-            } elseif (isset($order['delivery_location'])) { // Fallback to delivery_location column if school data is missing
-                   $decodedLocation = json_decode($order['delivery_location'], true);
-                   if (json_last_error() === JSON_ERROR_NONE) {
-                       $order['delivery_location'] = $decodedLocation;
-                   } else {
-                       $order['delivery_location'] = null; // Set to null if decoding fails
-                   }
+            } elseif (isset($order['delivery_location'])) {
+                $decodedLocation = json_decode($order['delivery_location'], true);
+                $order['delivery_location'] = (json_last_error() === JSON_ERROR_NONE) ? $decodedLocation : null;
             } else {
                 $order['delivery_location'] = null;
             }
 
-            // Remove redundant top-level fields
-            unset($order['user_full_name'], $order['phone_number'], $order['email']);
+            unset($order['user_full_name'], $order['cp_no'], $order['email']);
             unset($order['school_address'], $order['school_latitude'], $order['school_longitude']);
         }
     }
@@ -153,7 +138,6 @@ if ($orderId !== null && $action === null) {
     exit();
 }
 
-// Action to update driver location
 if ($action === 'update-location' && $orderId !== null && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = file_get_contents('php://input');
     $data = json_decode($input, true);
@@ -185,7 +169,6 @@ if ($action === 'update-location' && $orderId !== null && $_SERVER['REQUEST_METH
     }
 }
 
-// New action to update order status
 if ($action === 'update-status' && $orderId !== null && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = file_get_contents('php://input');
     $data = json_decode($input, true);
@@ -197,15 +180,14 @@ if ($action === 'update-status' && $orderId !== null && $_SERVER['REQUEST_METHOD
         exit();
     }
 
-    $tableName = ($orderType === 'custom') ? 'custom_orders' : 'orders';
-
-    // Validate allowed statuses (optional but recommended for security)
-    $allowedStatuses = ['pending', 'processing', 'delivering', 'delivered', 'cancelled', 'to be quoted', 'gathering', 'to be delivered', 'to deliver', 'delivered']; // Added statuses from your schema
+    $allowedStatuses = ['pending', 'processing', 'delivering', 'delivered', 'cancelled', 'to be quoted', 'gathering', 'to be delivered', 'to deliver'];
     if (!in_array($newStatus, $allowedStatuses)) {
         http_response_code(400);
         echo json_encode(['message' => 'Invalid status provided.']);
         exit();
     }
+
+    $tableName = ($orderType === 'custom') ? 'custom_orders' : 'orders';
 
     try {
         $stmt = $pdo->prepare("UPDATE {$tableName} SET status = ? WHERE id = ?");
@@ -223,7 +205,6 @@ if ($action === 'update-status' && $orderId !== null && $_SERVER['REQUEST_METHOD
         exit();
     }
 }
-
 
 http_response_code(400);
 echo json_encode(['message' => 'Invalid request. Specify orderId and orderType, or action, orderId, and orderType for update.']);
